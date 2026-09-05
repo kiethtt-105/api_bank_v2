@@ -202,7 +202,7 @@
 
 <header>
   <h1>VietQR API <span>Tester</span></h1>
-  <p>Trang test nhanh API tạo mã QR — dùng để kiểm tra trước khi gọi từ Shortcut iPhone.</p>
+  <p>Trang test API tạo mã QR — có thể lưu làm link chia sẻ theo giao dịch, và dùng để kiểm tra trước khi gọi từ Shortcut iPhone.</p>
 </header>
 
 <main>
@@ -277,7 +277,9 @@
       <a id="downloadLink" download="vietqr.png">Tải ảnh QR</a>
       <button id="copyCode">Copy chuỗi QR</button>
       <button id="copyCurl">Copy lệnh curl</button>
+      <button id="copyShareLink">Copy link chia sẻ</button>
     </div>
+    <p class="hint" id="shareHint" style="display:none; text-align:center;">Link chia sẻ chỉ chứa thông tin giao dịch, không chứa x-client-id/x-api-key.</p>
     <pre id="rawJson" style="display:none;"></pre>
   </div>
 </main>
@@ -302,6 +304,19 @@
     $('toggleKey').textContent = showing ? 'Hiện' : 'Ẩn';
   });
 
+  // ---- URL params (dùng cho link chia sẻ) ----
+  // Ví dụ: index.html?bin=970436&acc=1031451081&name=HUYNH+TRAN+TUAN+KIET&amount=79000&info=Chuyen+khoan&template=compact
+  const params = new URLSearchParams(location.search);
+
+  function applyParamsToForm(){
+    if (params.has('bin')) bankSelect.value = params.get('bin');
+    if (params.has('acc')) $('accountNo').value = params.get('acc');
+    if (params.has('name')) $('accountName').value = params.get('name');
+    if (params.has('amount')) $('amount').value = params.get('amount');
+    if (params.has('info')) $('addInfo').value = params.get('info');
+    if (params.has('template')) $('template').value = params.get('template');
+  }
+
   // load bank list
   const bankSelect = $('bankSelect');
   fetch('https://api.vietqr.io/v2/banks')
@@ -319,6 +334,13 @@
       manual.placeholder = 'Nhập mã BIN ngân hàng, VD: 970436';
       manual.style.marginTop = '8px';
       bankSelect.insertAdjacentElement('afterend', manual);
+    })
+    .finally(() => {
+      applyParamsToForm();
+      // Nếu link chia sẻ có đủ thông tin VÀ máy này đã lưu sẵn key, tự tạo QR luôn
+      const hasCreds = clientIdEl.value.trim() && apiKeyEl.value.trim();
+      const hasTx = params.get('bin') && params.get('acc');
+      if (hasCreds && hasTx) generateQR();
     });
 
   function showBanner(msg, type){
@@ -329,7 +351,19 @@
 
   let lastPayload = null;
 
-  $('genBtn').addEventListener('click', async () => {
+  function buildShareLink(body){
+    const u = new URL(location.href);
+    u.search = '';
+    u.searchParams.set('bin', body.acqId);
+    u.searchParams.set('acc', body.accountNo);
+    if (body.accountName) u.searchParams.set('name', body.accountName);
+    if (body.amount) u.searchParams.set('amount', body.amount);
+    if (body.addInfo) u.searchParams.set('info', body.addInfo);
+    u.searchParams.set('template', body.template);
+    return u.toString();
+  }
+
+  async function generateQR(){
     const clientId = clientIdEl.value.trim();
     const apiKey = apiKeyEl.value.trim();
     const acqId = bankSelect.value || (document.getElementById('acqIdManual') || {}).value || '';
@@ -371,6 +405,7 @@
       if (data.code === '00' && data.data && data.data.qrDataURL) {
         $('preview').innerHTML = `<img src="${data.data.qrDataURL}" alt="Mã QR VietQR">`;
         $('resultActions').style.display = 'flex';
+        $('shareHint').style.display = 'block';
         $('downloadLink').href = data.data.qrDataURL;
         $('copyCode').onclick = () => navigator.clipboard.writeText(data.data.qrCode || '');
         $('copyCurl').onclick = () => navigator.clipboard.writeText(
@@ -379,6 +414,7 @@
 --header 'x-api-key: ${apiKey}' \\
 --header 'Content-Type: application/json' \\
 --data-raw '${JSON.stringify(body)}'`);
+        $('copyShareLink').onclick = () => navigator.clipboard.writeText(buildShareLink(body));
         showBanner('Tạo mã QR thành công.', 'success');
       } else {
         $('preview').innerHTML = '<span class="placeholder">Không tạo được QR — xem chi tiết lỗi bên dưới.</span>';
@@ -392,7 +428,9 @@
     } finally {
       btn.disabled = false; btn.textContent = 'Tạo mã QR';
     }
-  });
+  }
+
+  $('genBtn').addEventListener('click', generateQR);
 </script>
 
 </body>
